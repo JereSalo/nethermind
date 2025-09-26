@@ -11,6 +11,7 @@ using Nethermind.Core.Extensions;
 using Nethermind.Int256;
 using Nethermind.Serialization.Rlp;
 using Nethermind.Trie;
+using Nethermind.Trie.Pruning;
 
 namespace Nethermind.State.Proofs
 {
@@ -192,6 +193,27 @@ namespace Nethermind.State.Proofs
 
                         value.StorageIndices.Add(storageIndex);
                         _nodeToVisitFilter.Add(childHash);
+                    }
+                    else
+                    {
+                        // Handle inline child nodes - they don't have their own hash but may contain storage values
+                        TreePath childPath = TreePath.Empty;
+                        TrieNode? inlineChild = node.GetChild(NullTrieNodeResolver.Instance, ref childPath, (byte)childIndex);
+                        if (inlineChild is not null && inlineChild.IsLeaf)
+                        {
+                            // Check if this inline leaf matches our storage path using temporary path traversal index
+                            int savedPathIndex = _pathTraversalIndex;
+                            _pathTraversalIndex = _pathTraversalIndex + 1; // Move past the branch node level
+
+                            Nibble[] thisStoragePath = _fullStoragePaths[storageIndex];
+                            bool isPathMatched = IsPathMatched(inlineChild, thisStoragePath);
+                            if (isPathMatched)
+                            {
+                                _accountProof.StorageProofs[storageIndex].Value = new RlpStream(inlineChild.Value.ToArray()).DecodeByteArray();
+                            }
+
+                            _pathTraversalIndex = savedPathIndex; // Restore path index
+                        }
                     }
                 }
             }
